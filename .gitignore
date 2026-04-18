@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Data & caches
+.cache/
+*.npy
+
+# Model artefacts (large files — track with Git LFS or exclude)
+models/*.onnx
+models/*.pt
+
+# Outputs
+results.txt
+time.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+/data   
