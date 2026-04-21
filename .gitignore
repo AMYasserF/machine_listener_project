@@ -9,9 +9,6 @@ build/
 .cache/
 *.npy
 
-# Model artefacts (large files — track with Git LFS or exclude)
-models/*.onnx
-models/*.pt
 
 # Outputs
 results.txt
