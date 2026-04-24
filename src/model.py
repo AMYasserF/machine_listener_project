@@ -2,8 +2,12 @@
 src/model.py — Model Architecture, Focal Loss & ONNX Export
 =============================================================
 Provides a factory for ultra-lightweight audio classifiers built on top of
-``timm`` pretrained backbones, plus a numerically stable Focal Loss and an
-ONNX export utility.
+``timm`` backbones (trained from scratch), plus a numerically stable Focal
+Loss and an ONNX export utility.
+
+**IMPORTANT**: All models are trained FROM SCRATCH — no pretrained weights
+are used.  This is a hard requirement to avoid data leakage concerns and
+ensure the model learns solely from the provided training data.
 
 Available backbones
 -------------------
@@ -18,8 +22,7 @@ Available backbones
 +----------------------------+--------+-----------------------------------+
 
 All backbones are automatically adapted for **single-channel** PCEN
-spectrogram input ``(1, 128, 313)`` via ``timm``'s ``in_chans`` argument,
-which averages pretrained 3-channel conv1 weights into a single channel.
+spectrogram input ``(1, 128, 313)`` via ``timm``'s ``in_chans`` argument.
 """
 
 from __future__ import annotations
@@ -50,11 +53,14 @@ _BACKBONE_REGISTRY = {
 def build_model(
     backbone: str = "efficientnet_b0",
     num_classes: int = NUM_CLASSES,
-    pretrained: bool = True,
+    pretrained: bool = False,
     drop_rate: float = 0.3,
     drop_path_rate: float = 0.2,
 ) -> nn.Module:
     """Create a lightweight audio classifier from a ``timm`` backbone.
+
+    **All models are trained from scratch** — pretrained weights are NOT
+    allowed per project requirements.
 
     Parameters
     ----------
@@ -64,8 +70,8 @@ def build_model(
     num_classes : int
         Number of output classes (default 6).
     pretrained : bool
-        Load ImageNet pretrained weights (recommended — the low-level
-        edge / texture filters transfer well to spectrograms).
+        Must be ``False``.  Kept for API compatibility but will raise
+        an error if set to ``True``.
     drop_rate : float
         Classifier dropout probability.
     drop_path_rate : float
@@ -78,6 +84,14 @@ def build_model(
         Ready-to-train PyTorch model.  Input shape: ``(B, 1, 128, 313)``.
         Output shape: ``(B, num_classes)``  (raw logits, no softmax).
     """
+    # ── HARD CONSTRAINT: no pretrained weights ──
+    if pretrained:
+        raise ValueError(
+            "pretrained=True is NOT allowed. "
+            "All models must be trained from scratch (no ImageNet weights). "
+            "This is a project requirement to avoid data leakage."
+        )
+
     timm_name = _BACKBONE_REGISTRY.get(backbone)
     if timm_name is None:
         raise ValueError(
@@ -87,7 +101,7 @@ def build_model(
 
     model = timm.create_model(
         timm_name,
-        pretrained=pretrained,
+        pretrained=False,          # ALWAYS from scratch
         in_chans=1,                # single-channel PCEN spectrogram
         num_classes=num_classes,
         drop_rate=drop_rate,

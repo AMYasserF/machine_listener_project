@@ -148,8 +148,8 @@ SAVE_DIR = os.path.join(WORK_DIR, "models")
 results = train(
     data_root=DATA_PATH,
     backbone="efficientnet_b0",      # or "mobilenetv3_small" for faster
-    pretrained=True,
-    epochs=60,                        # increase to 80-100 for best accuracy
+    pretrained=False,                 # MUST be False — train from scratch!
+    epochs=50,                        # good balance of accuracy vs overfitting
     batch_size=32,                    # GPU can handle larger batches
     lr=3e-4,
     weight_decay=1e-2,
@@ -159,15 +159,16 @@ results = train(
     drop_rate=0.3,
     drop_path_rate=0.2,
     max_grad_norm=1.0,
-    patience=15,                      # early stopping
+    patience=12,                      # early stopping
     val_ratio=0.15,
-    test_ratio=0.15,
+    test_ratio=0.20,                  # slightly larger test set for confidence
     num_workers=2,                    # Kaggle has 2+ CPU cores
     cache_dir=CACHE_DIR,              # use pre-computed features
     noise_suppression=True,
     use_amp=True,                     # fp16 on GPU = 2x speedup
     save_dir=SAVE_DIR,
     seed=42,
+    max_train_samples=None,           # set e.g. 500 to train on a small subset
 )
 
 print("\nDone! Results:", results)

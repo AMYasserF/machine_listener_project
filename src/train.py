@@ -193,8 +193,8 @@ def train(
     *,
     data_root: str = "data/",
     backbone: str = "efficientnet_b0",
-    pretrained: bool = True,
-    epochs: int = 60,
+    pretrained: bool = False,
+    epochs: int = 50,
     batch_size: int = 16,
     lr: float = 3e-4,
     weight_decay: float = 1e-2,
@@ -204,15 +204,16 @@ def train(
     drop_rate: float = 0.3,
     drop_path_rate: float = 0.2,
     max_grad_norm: float = 1.0,
-    patience: int = 15,
+    patience: int = 12,
     val_ratio: float = 0.15,
-    test_ratio: float = 0.15,
+    test_ratio: float = 0.20,
     num_workers: int = 0,
     cache_dir: Optional[str] = None,
     noise_suppression: bool = True,
     use_amp: bool = False,
     save_dir: str = "models/",
     seed: int = 42,
+    max_train_samples: Optional[int] = None,
 ) -> Dict[str, object]:
     """End-to-end training procedure.
 
@@ -259,6 +260,7 @@ def train(
         cache_dir=cache_dir,
         noise_suppression=noise_suppression,
         seed=seed,
+        max_train_samples=max_train_samples,
     )
     print(f"  Train : {len(train_loader.dataset)} samples  ({len(train_loader)} batches)")
     print(f"  Val   : {len(val_loader.dataset)} samples  ({len(val_loader)} batches)")
@@ -446,7 +448,9 @@ def parse_args() -> argparse.Namespace:
     g.add_argument("--cache", type=str, default=None,
                    help="Cache dir for pre-computed features (.npy)")
     g.add_argument("--val-ratio", type=float, default=0.15)
-    g.add_argument("--test-ratio", type=float, default=0.15)
+    g.add_argument("--test-ratio", type=float, default=0.20)
+    g.add_argument("--max-train-samples", type=int, default=None,
+                   help="Cap training set size (stratified sub-sample)")
     g.add_argument("--workers", type=int, default=0,
                    help="DataLoader num_workers (0 = main process)")
     g.add_argument("--no-denoise", action="store_true",
@@ -456,14 +460,14 @@ def parse_args() -> argparse.Namespace:
     g = p.add_argument_group("Model")
     g.add_argument("--backbone", type=str, default="efficientnet_b0",
                    choices=["efficientnet_b0", "mobilenetv3_small", "mobilenetv3_large"])
-    g.add_argument("--no-pretrained", action="store_true",
-                   help="Train from scratch (no ImageNet weights)")
+    g.add_argument("--no-pretrained", action="store_true", default=True,
+                   help="Train from scratch (always True — pretrained is forbidden)")
     g.add_argument("--drop-rate", type=float, default=0.3)
     g.add_argument("--drop-path-rate", type=float, default=0.2)
 
     # ── Optimiser ──
     g = p.add_argument_group("Optimiser")
-    g.add_argument("--epochs", type=int, default=60)
+    g.add_argument("--epochs", type=int, default=50)
     g.add_argument("--batch-size", type=int, default=16)
     g.add_argument("--lr", type=float, default=3e-4)
     g.add_argument("--weight-decay", type=float, default=1e-2)
@@ -480,7 +484,7 @@ def parse_args() -> argparse.Namespace:
 
     # ── Training ──
     g = p.add_argument_group("Training")
-    g.add_argument("--patience", type=int, default=15,
+    g.add_argument("--patience", type=int, default=12,
                    help="Early stopping patience (epochs)")
     g.add_argument("--save-dir", type=str, default="models/")
     g.add_argument("--seed", type=int, default=42)
@@ -517,4 +521,5 @@ if __name__ == "__main__":
         use_amp=args.amp,
         save_dir=args.save_dir,
         seed=args.seed,
+        max_train_samples=args.max_train_samples,
     )

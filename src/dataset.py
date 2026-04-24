@@ -259,12 +259,13 @@ def build_dataloaders(
     data_root: str,
     *,
     val_ratio: float = 0.15,
-    test_ratio: float = 0.15,
+    test_ratio: float = 0.20,
     batch_size: int = 16,
     num_workers: int = 4,
     cache_dir: Optional[str] = None,
     noise_suppression: bool = True,
     seed: int = 42,
+    max_train_samples: Optional[int] = None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """Build train / val / test DataLoaders from the on-disk directory tree.
 
@@ -275,6 +276,8 @@ def build_dataloaders(
     val_ratio, test_ratio : float
         Fraction of data reserved for validation and test.  Splitting is
         **stratified** to preserve class proportions.
+        Default ``test_ratio=0.20`` (slightly larger than typical to
+        verify generalisation without sacrificing too much training data).
     batch_size : int
         Mini-batch size (applies to train; val/test use the same).
     num_workers : int
@@ -313,9 +316,36 @@ def build_dataloaders(
         random_state=seed,
     )
 
+    # ── Optional: sub-sample training set ──
+    if max_train_samples is not None and max_train_samples < len(train_files):
+        keep_ratio = max_train_samples / len(train_files)
+        train_files, _, train_labels, _ = train_test_split(
+            train_files, train_labels,
+            train_size=keep_ratio,
+            stratify=train_labels,
+            random_state=seed,
+        )
+        print(f"  ⚠ Training subset capped to {len(train_files)} samples "
+              f"(max_train_samples={max_train_samples})")
+
+    # ── Verify no overlap (data leakage guard) ──
+    train_set = set(train_files)
+    val_set = set(val_files)
+    test_set = set(test_files)
+    assert train_set.isdisjoint(val_set), "DATA LEAKAGE: train ∩ val is non-empty!"
+    assert train_set.isdisjoint(test_set), "DATA LEAKAGE: train ∩ test is non-empty!"
+    assert val_set.isdisjoint(test_set), "DATA LEAKAGE: val ∩ test is non-empty!"
+
     train_samples = list(zip(train_files, train_labels))
     val_samples   = list(zip(val_files, val_labels))
     test_samples  = list(zip(test_files, test_labels))
+
+    total = len(filepaths)
+    print(f"  Split sizes  — train: {len(train_samples)}, "
+          f"val: {len(val_samples)}, test: {len(test_samples)}")
+    print(f"  Split ratios — train: {len(train_samples)/total:.1%}, "
+          f"val: {len(val_samples)/total:.1%}, "
+          f"test: {len(test_samples)/total:.1%}")
 
     # ── Datasets ──
     train_cache = os.path.join(cache_dir, "train") if cache_dir else None
