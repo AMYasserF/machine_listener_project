@@ -1,109 +1,51 @@
 """
-Kaggle Training Notebook — Machine Fault Recognition
+Local Training Script — Machine Fault Recognition
 =====================================================
-Paste each section below into a separate cell in a Kaggle Notebook.
-
-Setup:
-  1. Create a new Kaggle Notebook → enable GPU (Settings → Accelerator → GPU T4 x2)
-  2. Add Dataset: click "+ Add Data" → search "alieldinalaa/nn-cmp27-dataset" → Add
-  3. Upload your src/ folder as a SECOND dataset:
-     - Go to kaggle.com/datasets → New Dataset → name it "machine-listener-src"
-     - Upload your entire project folder (just src/ folder is enough)
-     - Click Create
-  4. Add that dataset too: "+ Add Data" → "Your Datasets" → "machine-listener-src"
-  5. Paste each cell below and run!
+Setup Instructions for your laptop:
+  1. Make sure your project folder looks like this:
+     project/
+     ├── data/                  <-- Put the unzipped dataset here (Machine 1, Machine 2, etc.)
+     ├── src/                   <-- Your python modules (dataset.py, model.py, etc.)
+     ├── models/                <-- Trained models will be saved here
+     └── train_local.ipynb      <-- THIS notebook/script
+  2. Install requirements: pip install torch torchvision torchaudio timm librosa onnx onnxscript onnxruntime scikit-learn matplotlib
+  3. Run the cells below!
 """
 
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  CELL 1 — Setup & Install Dependencies                      ║
+# ║  CELL 1 — Setup Paths & Verify Environment                    ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
-import subprocess, sys, os, shutil
-
-# Install missing packages
-subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
-                       "timm", "onnxscript", "onnx", "onnxruntime", "librosa"])
-
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  CELL 2 — Copy src/ to working directory                    ║
-# ╚═══════════════════════════════════════════════════════════════╝
-
-# Find where your uploaded source code dataset is
-# Kaggle mounts datasets at /kaggle/input/<dataset-name>/
-INPUT_BASE = "/kaggle/input"
-
-src_candidates = []
-for ds in os.listdir(INPUT_BASE):
-    ds_path = os.path.join(INPUT_BASE, ds)
-    # Look for a 'src' folder inside
-    if os.path.isdir(os.path.join(ds_path, "src")):
-        src_candidates.append(os.path.join(ds_path, "src"))
-    # Or maybe the dataset IS the src folder contents
-    if os.path.isfile(os.path.join(ds_path, "preprocess.py")):
-        src_candidates.append(ds_path)
-
-if not src_candidates:
-    print("WARNING: Could not auto-detect src/ folder.")
-    print("Available datasets:", os.listdir(INPUT_BASE))
-    print("\n>>> Manually set SRC_PATH below <<<")
-    SRC_PATH = None
-else:
-    SRC_PATH = src_candidates[0]
-    print(f"Found source code at: {SRC_PATH}")
-
-# Copy to working directory so we can import it
-WORK_DIR = "/kaggle/working"
-os.chdir(WORK_DIR)
-
-if SRC_PATH:
-    dst = os.path.join(WORK_DIR, "src")
-    if os.path.exists(dst):
-        shutil.rmtree(dst)
-    shutil.copytree(SRC_PATH, dst)
-    print(f"Copied src/ → {dst}")
-    print("Contents:", os.listdir(dst))
-
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  CELL 3 — Discover the dataset path                         ║
-# ╚═══════════════════════════════════════════════════════════════╝
-
-# Find the training data (Machine 1/2/3 folders)
-DATA_PATH = None
-for ds in os.listdir(INPUT_BASE):
-    ds_path = os.path.join(INPUT_BASE, ds)
-    # Check if this dataset contains "Machine 1", "Machine 2", etc.
-    children = os.listdir(ds_path) if os.path.isdir(ds_path) else []
-    if any("Machine" in c for c in children):
-        DATA_PATH = ds_path
-        break
-    # Maybe nested one level deeper
-    for child in children:
-        child_path = os.path.join(ds_path, child)
-        if os.path.isdir(child_path):
-            grandchildren = os.listdir(child_path)
-            if any("Machine" in g for g in grandchildren):
-                DATA_PATH = child_path
-                break
-    if DATA_PATH:
-        break
-
-if DATA_PATH:
-    print(f"Dataset found at: {DATA_PATH}")
-    print("Contents:", sorted(os.listdir(DATA_PATH)))
-else:
-    print("ERROR: Could not find Machine 1/2/3 folders!")
-    print("Available datasets and their contents:")
-    for ds in os.listdir(INPUT_BASE):
-        ds_path = os.path.join(INPUT_BASE, ds)
-        if os.path.isdir(ds_path):
-            print(f"  {ds}/: {os.listdir(ds_path)[:10]}")
-
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  CELL 4 — Verify imports work                               ║
-# ╚═══════════════════════════════════════════════════════════════╝
-
+import os
 import sys
-sys.path.insert(0, WORK_DIR)
+
+# 1. Define Local Paths (Assuming this script is in the project root)
+PROJECT_ROOT = os.path.abspath(".")
+DATA_PATH = os.path.join(PROJECT_ROOT, "data")
+SAVE_DIR = os.path.join(PROJECT_ROOT, "models")
+CACHE_DIR = os.path.join(PROJECT_ROOT, ".cache", "features")
+
+# Ensure Python can find the 'src' folder
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+print(f"✅ Project Root: {PROJECT_ROOT}")
+print(f"✅ Data Path: {DATA_PATH}")
+
+if not os.path.exists(DATA_PATH):
+    print("❌ ERROR: 'data' folder not found! Please make sure your dataset is extracted in a folder named 'data' next to this script.")
+elif not os.path.exists(os.path.join(PROJECT_ROOT, "src")):
+    print("❌ ERROR: 'src' folder not found! Please make sure the 'src' folder is next to this script.")
+else:
+    print("✅ Project structure looks good!")
+
+# Create save directories if they don't exist
+os.makedirs(SAVE_DIR, exist_ok=True)
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  CELL 2 — Verify imports & Dataset                            ║
+# ╚═══════════════════════════════════════════════════════════════╝
 
 from src.preprocess import preprocess_audio, TARGET_SR, TARGET_LENGTH
 from src.features import extract_pcen_mel
@@ -119,20 +61,16 @@ for cls_id in sorted(counts):
     print(f"  Class {cls_id} ({LABEL_NAMES[cls_id]}): {counts[cls_id]} files")
 
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  CELL 5 — Pre-compute features (optional but saves time)    ║
+# ║  CELL 3 — Pre-compute features (optional but saves time)      ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
 # This caches PCEN features to disk so training epochs are fast.
-# Takes ~10-20 min on the full dataset but saves hours over many epochs.
-# Skip this cell if you want to start training immediately.
-
-CACHE_DIR = os.path.join(WORK_DIR, ".cache", "features")
-
+# Takes some time initially but saves hours over many epochs.
 from src.dataset import precompute_features
 precompute_features(DATA_PATH, CACHE_DIR, noise_suppression=True)
 
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  CELL 6 — Train!                                            ║
+# ║  CELL 4 — Train!                                              ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
 import torch
@@ -140,63 +78,45 @@ print(f"PyTorch: {torch.__version__}")
 print(f"CUDA available: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
+else:
+    print("⚠️ WARNING: CUDA not available. Training on CPU will be slow.")
 
 from src.train import train
 
-SAVE_DIR = os.path.join(WORK_DIR, "models")
+# VERY IMPORTANT FOR WINDOWS LAPTOPS:
+# PyTorch DataLoader multiprocessing on Windows requires the training 
+# code to be inside an `if __name__ == '__main__':` block.
+if __name__ == '__main__':
+    results = train(
+        data_root=DATA_PATH,
+        backbone="efficientnet_b0",      # or "mobilenetv3_small" for faster laptop training
+        pretrained=False,                # MUST be False — train from scratch!
+        epochs=50,                       # good balance of accuracy vs overfitting
+        batch_size=16,                   # Reduced from 32 to 16 for standard laptop GPUs (e.g., 4GB/6GB VRAM)
+        lr=3e-4,
+        weight_decay=1e-2,
+        warmup_ratio=0.05,
+        gamma=2.0,                       # Focal Loss focusing
+        label_smoothing=0.1,
+        drop_rate=0.3,
+        drop_path_rate=0.2,
+        max_grad_norm=1.0,
+        patience=12,                     # early stopping
+        val_ratio=0.15,
+        test_ratio=0.20,                 # slightly larger test set for confidence
+        num_workers=0,                   # MUST BE 0 ON WINDOWS LAPTOPS to avoid multiprocessing crash. Change to 2/4 if on Linux/Mac.
+        cache_dir=CACHE_DIR,             # use pre-computed features
+        noise_suppression=True,
+        use_amp=torch.cuda.is_available(), # Only use AMP (fp16) if GPU is available
+        save_dir=SAVE_DIR,
+        seed=42,
+        max_train_samples=None,          # set e.g. 500 to train on a small subset for quick laptop testing
+    )
 
-results = train(
-    data_root=DATA_PATH,
-    backbone="efficientnet_b0",      # or "mobilenetv3_small" for faster
-    pretrained=False,                 # MUST be False — train from scratch!
-    epochs=50,                        # good balance of accuracy vs overfitting
-    batch_size=32,                    # GPU can handle larger batches
-    lr=3e-4,
-    weight_decay=1e-2,
-    warmup_ratio=0.05,
-    gamma=2.0,                        # Focal Loss focusing
-    label_smoothing=0.1,
-    drop_rate=0.3,
-    drop_path_rate=0.2,
-    max_grad_norm=1.0,
-    patience=12,                      # early stopping
-    val_ratio=0.15,
-    test_ratio=0.20,                  # slightly larger test set for confidence
-    num_workers=2,                    # Kaggle has 2+ CPU cores
-    cache_dir=CACHE_DIR,              # use pre-computed features
-    noise_suppression=True,
-    use_amp=True,                     # fp16 on GPU = 2x speedup
-    save_dir=SAVE_DIR,
-    seed=42,
-    max_train_samples=None,           # set e.g. 500 to train on a small subset
-)
-
-print("\nDone! Results:", results)
-
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  CELL 7 — Download your trained model                       ║
-# ╚═══════════════════════════════════════════════════════════════╝
-
-# The trained files are saved at:
-#   /kaggle/working/models/best_model.pt   ← PyTorch checkpoint
-#   /kaggle/working/models/model.onnx      ← ONNX for inference
-#   /kaggle/working/models/history.json    ← training curves
-#
-# To download: click the "Output" tab in the right panel of Kaggle,
-# then click on each file to download it.
-#
-# After downloading, place them in your local project:
-#   d:\CMP\NN\project\models\best_model.pt
-#   d:\CMP\NN\project\models\model.onnx
-
-print("Files saved to /kaggle/working/models/:")
-for f in os.listdir(SAVE_DIR):
-    fpath = os.path.join(SAVE_DIR, f)
-    size = os.path.getsize(fpath) / 1e6
-    print(f"  {f:25s} {size:8.2f} MB")
+    print("\nDone! Results:", results)
 
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  CELL 8 (OPTIONAL) — Plot training curves                   ║
+# ║  CELL 5 — Plot training curves                                ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
 import json
@@ -232,4 +152,4 @@ axes[2].grid(True, alpha=0.3)
 plt.tight_layout()
 plt.savefig(os.path.join(SAVE_DIR, "training_curves.png"), dpi=150)
 plt.show()
-print("Training curves saved!")
+print(f"Training curves saved to {SAVE_DIR}!")
