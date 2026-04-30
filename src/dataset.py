@@ -33,6 +33,10 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
+import concurrent.futures
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.model_selection import GroupShuffleSplit
+import librosa
 
 from src.preprocess import (
     TARGET_SR,
@@ -255,6 +259,55 @@ class InferenceDataset(Dataset):
 # DataLoader factories
 # ──────────────────────────────────────────────────────────────
 
+def _assign_groups(samples: List[Tuple[str, int]], n_clusters_per_class: int = 50) -> np.ndarray:
+    """Extracts fast features and clusters them to group similar audio sessions."""
+    print("🔍 Extracting acoustic fingerprints to prevent data leakage (this takes a moment)...")
+    features = [None] * len(samples)
+
+    # Fast feature extraction: load only 1 second of audio at 8kHz, extract 13 MFCCs
+    def process_file(idx, filepath):
+        try:
+            y, sr = librosa.load(filepath, sr=8000, duration=1.0, mono=True)
+            mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+            return idx, np.mean(mfcc, axis=1)
+        except:
+            return idx, np.zeros(13)
+
+    # Use multithreading for speed
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(process_file, i, s[0]) for i, s in enumerate(samples)]
+        for future in concurrent.futures.as_completed(futures):
+            idx, feat = future.result()
+            features[idx] = feat
+
+    features = np.array(features)
+    groups = np.zeros(len(samples), dtype=int)
+
+    print(f"🧩 Clustering into sessions to isolate train and test sets...")
+    
+    # Cluster WITHIN each class separately to keep labels pure
+    current_group_id = 0
+    labels = np.array([s[1] for s in samples])
+
+    for c in range(NUM_CLASSES):
+        class_mask = (labels == c)
+        if not np.any(class_mask):
+            continue
+
+        class_features = features[class_mask]
+        # Use MiniBatchKMeans for extreme speed on large datasets
+        kmeans = MiniBatchKMeans(
+            n_clusters=min(n_clusters_per_class, len(class_features)), 
+            random_state=42, 
+            n_init="auto"
+        )
+        class_groups = kmeans.fit_predict(class_features)
+
+        groups[class_mask] = class_groups + current_group_id
+        current_group_id += n_clusters_per_class
+
+    return groups
+
 def build_dataloaders(
     data_root: str,
     *,
@@ -299,34 +352,36 @@ def build_dataloaders(
     filepaths = list(filepaths)
     labels = list(labels)
 
-    # ── Stratified split: train+val vs test ──
-    train_val_files, test_files, train_val_labels, test_labels = train_test_split(
-        filepaths, labels,
-        test_size=test_ratio,
-        stratify=labels,
-        random_state=seed,
-    )
+    # ── 1. Generate Session Groups ──
+    groups = _assign_groups(all_samples, n_clusters_per_class=60)
 
-    # ── Stratified split: train vs val ──
+    # ── 2. Grouped split: train+val vs test ──
+    gss_test = GroupShuffleSplit(n_splits=1, test_size=test_ratio, random_state=seed)
+    train_val_idx, test_idx = next(gss_test.split(filepaths, labels, groups))
+
+    train_val_files = [filepaths[i] for i in train_val_idx]
+    train_val_labels = [labels[i] for i in train_val_idx]
+    train_val_groups = [groups[i] for i in train_val_idx]
+
+    test_files = [filepaths[i] for i in test_idx]
+    test_labels = [labels[i] for i in test_idx]
+
+    # ── 3. Grouped split: train vs val ──
     relative_val = val_ratio / (1.0 - test_ratio)
-    train_files, val_files, train_labels, val_labels = train_test_split(
-        train_val_files, train_val_labels,
-        test_size=relative_val,
-        stratify=train_val_labels,
-        random_state=seed,
-    )
+    gss_val = GroupShuffleSplit(n_splits=1, test_size=relative_val, random_state=seed)
+    train_idx, val_idx = next(gss_val.split(train_val_files, train_val_labels, train_val_groups))
 
-    # ── Optional: sub-sample training set ──
-    if max_train_samples is not None and max_train_samples < len(train_files):
-        keep_ratio = max_train_samples / len(train_files)
-        train_files, _, train_labels, _ = train_test_split(
-            train_files, train_labels,
-            train_size=keep_ratio,
-            stratify=train_labels,
-            random_state=seed,
-        )
-        print(f"  ⚠ Training subset capped to {len(train_files)} samples "
-              f"(max_train_samples={max_train_samples})")
+    # Optional: sub-sample training set
+    if max_train_samples is not None and max_train_samples < len(train_idx):
+        # Fallback to simple slice if sub-sampling is requested
+        train_idx = train_idx[:max_train_samples]
+        print(f"  ⚠ Training subset capped to {len(train_idx)} samples.")
+
+    train_files = [train_val_files[i] for i in train_idx]
+    train_labels = [train_val_labels[i] for i in train_idx]
+
+    val_files = [train_val_files[i] for i in val_idx]
+    val_labels = [train_val_labels[i] for i in val_idx]
 
     # ── Verify no overlap (data leakage guard) ──
     train_set = set(train_files)
